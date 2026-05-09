@@ -71,3 +71,5 @@ npx ts-node run.ts --niche <slug>
 ## Workflows
 
 @docs/research-and-script-workflow.md
+@docs/yt-tracker-workflow.md
+@docs/yt-analysis-workflow.md
