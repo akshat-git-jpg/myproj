@@ -39,6 +39,7 @@ class ProcessResult:
     video_code: str
     is_new_video: bool
     tools: list[str]
+    non_affiliate_tools: list[str]   # subset of tools that don't have an affiliate program
     actual_links_text: str
     short_links_text: str
     description: str
@@ -57,6 +58,21 @@ def generate_video_code(existing_codes: set[str], max_attempts: int = 100) -> st
 def format_link_block(items: list[tuple[str, str]]) -> str:
     """[(tool, url), ...] -> 'tool1: url1\\ntool2: url2'."""
     return "\n".join(f"{tool}: {url}" for tool, url in items)
+
+
+def format_actual_links_block(items: list[tuple[str, str, bool]]) -> str:
+    """[(tool, url, has_affiliate), ...] -> per-tool block.
+
+    Affiliate entries:     'tool: url'
+    Non-affiliate entries: 'tool: url (no affiliate)'
+    """
+    lines = []
+    for tool, url, has_affiliate in items:
+        if has_affiliate:
+            lines.append(f"{tool}: {url}")
+        else:
+            lines.append(f"{tool}: {url} (no affiliate)")
+    return "\n".join(lines)
 
 
 def _existing_video_code_for_title(d1: D1Client, title: str) -> str | None:
@@ -93,12 +109,43 @@ def process_one_video(
     if not detected:
         raise ProcessError("LLM returned no tools — refine notes and try again")
 
-    unapproved = [t for t in detected if not affiliates[t].is_approved]
-    if unapproved:
-        raise ProcessError(
-            f"Detected tools have approval not Approved: {', '.join(unapproved)}"
-        )
+    # Resolve target URL + coupon for each detected tool
+    resolved: list[dict] = []  # {slug, display_name, target_url, coupon_code, has_affiliate}
+    for entry in detected:
+        slug = entry["slug"]
+        rec = affiliates.get(slug)
+        if rec is not None and rec.is_approved and rec.target_url.strip():
+            resolved.append({
+                "slug": slug,
+                "display_name": entry["display_name"] or rec.display_name,
+                "target_url": rec.target_url,
+                "coupon_code": rec.coupon_code,
+                "has_affiliate": True,
+            })
+        else:
+            # Non-affiliate path: prefer sheet URL if available (e.g., "Pending"
+            # status with a known URL), else LLM-provided homepage_url.
+            fallback_url = (rec.target_url.strip() if rec else "") or entry["homepage_url"]
+            if not fallback_url:
+                # No URL at all — skip just this tool with a warning to stderr.
+                print(
+                    f"  WARN: skipping {slug!r} — no URL available "
+                    f"(not in affiliate sheet AND LLM provided no homepage_url)",
+                    file=sys.stderr,
+                )
+                continue
+            resolved.append({
+                "slug": slug,
+                "display_name": entry["display_name"],
+                "target_url": fallback_url,
+                "coupon_code": "",
+                "has_affiliate": False,
+            })
 
+    if not resolved:
+        raise ProcessError("No tools resolved — all detected tools failed URL resolution")
+
+    # Get/generate video_code
     existing_code = _existing_video_code_for_title(d1, video_title)
     if existing_code is not None:
         video_code = existing_code
@@ -116,33 +163,42 @@ def process_one_video(
             [video_code, video_title, now],
         )
 
-    actual_pairs: list[tuple[str, str]] = []
+    actual_items: list[tuple[str, str, bool]] = []  # (tool, url, has_affiliate)
     short_pairs: list[tuple[str, str]] = []
     link_specs: list[dict] = []
-    for tool in detected:
-        slug = f"{video_code}/{tool}"
-        target = affiliates[tool].target_url
+    non_affiliate_tools: list[str] = []
+    tools_used: list[str] = []
+
+    for r in resolved:
+        slug = f"{video_code}/{r['slug']}"
         short = f"https://{link_domain}/{slug}"
-        actual_pairs.append((tool, target))
-        short_pairs.append((tool, short))
-        link_specs.append(
-            {"tool": tool, "short_url": short, "coupon_code": affiliates[tool].coupon_code}
-        )
+        actual_items.append((r["slug"], r["target_url"], r["has_affiliate"]))
+        short_pairs.append((r["slug"], short))
+        link_specs.append({
+            "tool": r["slug"],
+            "short_url": short,
+            "coupon_code": r["coupon_code"],
+        })
+        tools_used.append(r["slug"])
+        if not r["has_affiliate"]:
+            non_affiliate_tools.append(r["slug"])
         if slug in already_present:
             continue
         d1.query(
-            "INSERT INTO links (slug, video_code, tool, target_url, created_at) VALUES (?, ?, ?, ?, ?)",
-            [slug, video_code, tool, target, now],
+            "INSERT INTO links (slug, video_code, tool, target_url, created_at) "
+            "VALUES (?, ?, ?, ?, ?)",
+            [slug, video_code, r["slug"], r["target_url"], now],
         )
-        kv.put(slug, target)
+        kv.put(slug, r["target_url"])
 
     description = generate_description(video_title, video_notes, link_specs)
 
     return ProcessResult(
         video_code=video_code,
         is_new_video=is_new_video,
-        tools=detected,
-        actual_links_text=format_link_block(actual_pairs),
+        tools=tools_used,
+        non_affiliate_tools=non_affiliate_tools,
+        actual_links_text=format_actual_links_block(actual_items),
         short_links_text=format_link_block(short_pairs),
         description=description,
     )
@@ -208,7 +264,10 @@ def main() -> int:
         )
 
         processed += 1
-        print(f"  ✓ {result.video_code} — {len(result.tools)} link(s); status → To Review")
+        non_aff_note = ""
+        if result.non_affiliate_tools:
+            non_aff_note = f" | NON-AFFILIATE (verify URLs): {', '.join(result.non_affiliate_tools)}"
+        print(f"  ✓ {result.video_code} — {len(result.tools)} link(s); status → To Review{non_aff_note}")
 
     print(f"\nProcessed: {processed} | Failed: {failed}")
     return 0 if failed == 0 else 1

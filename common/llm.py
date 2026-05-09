@@ -23,11 +23,18 @@ def detect_tools(
     video_notes: str,
     candidate_tools: dict[str, str],
     model: str = DEFAULT_MODEL,
-) -> list[str]:
-    """Return the subset of candidate_tools (by slug) the creator promotes.
+) -> list[dict]:
+    """Identify ALL tools the creator promotes (affiliate or not).
 
-    candidate_tools: {slug: display_name}
-    Always returns slugs that exist in candidate_tools (filters hallucinations).
+    candidate_tools: {slug: display_name} — tools that have an affiliate program.
+
+    Returns: list of dicts with keys:
+      - slug (str): kebab-case slug
+      - display_name (str): human name
+      - homepage_url (str): "" for slugs in candidate_tools, else LLM's best guess
+
+    Filters out empty-slug entries. Does NOT filter by candidate list — non-affiliate
+    tools (slugs not in candidate_tools) are returned with their homepage_url.
     """
     candidates_block = "\n".join(
         f"- {slug} — {display}" for slug, display in candidate_tools.items()
@@ -39,11 +46,36 @@ def detect_tools(
     )
     schema = {
         "type": "object",
-        "properties": {"tools": {"type": "array", "items": {"type": "string"}}},
+        "properties": {
+            "tools": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "slug": {"type": "string"},
+                        "display_name": {"type": "string"},
+                        "homepage_url": {"type": "string"},
+                    },
+                    "required": ["slug", "display_name", "homepage_url"],
+                },
+            }
+        },
     }
     parsed = gemini.generate_json(model=model, prompt=prompt, schema=schema)
     raw = parsed.get("tools", []) if isinstance(parsed, dict) else []
-    return [t for t in raw if t in candidate_tools]
+    out = []
+    for entry in raw:
+        if not isinstance(entry, dict):
+            continue
+        slug = (entry.get("slug") or "").strip()
+        if not slug:
+            continue
+        out.append({
+            "slug": slug,
+            "display_name": (entry.get("display_name") or slug).strip(),
+            "homepage_url": (entry.get("homepage_url") or "").strip(),
+        })
+    return out
 
 
 def generate_description(
