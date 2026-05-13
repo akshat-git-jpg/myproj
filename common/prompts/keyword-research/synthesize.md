@@ -17,7 +17,7 @@ Output format (use these exact headings):
 ## Top affiliated softwares
 | Software | Channels | Videos | What's going on |
 | --- | --- | --- | --- |
-| ... | ... | ... | one-line context: which channels are promoting it, what they're saying, any visible affiliate signal (e.g., "ElevenLabs via Alfie's link") |
+| ... | ... | ... | one-line context: which channels are promoting it, name the specific video titles where it appears, any visible affiliate signal (e.g., "ElevenLabs in MonsGuide's 'How I Make $9K/mo With AI'") |
 
 ## Top topics
 | Topic | Channels | Videos | What's going on |
@@ -25,7 +25,7 @@ Output format (use these exact headings):
 | ... | ... | ... | one-line context |
 
 ## Channel patterns
-2–5 short paragraphs. Which channels are clustering on the same affiliate softwares or topics? Who's an outlier? Name the channels. Note any pairs or trios that consistently promote the same software.
+2–5 short paragraphs. Which channels are clustering on the same affiliate softwares or topics? Who's an outlier? Name the channels and reference specific video titles where they illustrate a pattern. Note any pairs or trios that consistently promote the same software.
 ```
 
 ---

@@ -86,14 +86,20 @@ def tally(raw, key):
 
 
 def per_channel_breakdown(raw):
-    """Return list of {channel, affiliated_softwares, topics} for the synthesis prompt."""
+    """Return list of {channel, videos, affiliated_softwares, topics} for the synthesis prompt."""
     out = []
     for ch in raw.get("channels", []):
         affiliated = []
         topics = []
         seen_aff = set()
         seen_tp = set()
+        videos = []
         for v in ch.get("videos", []):
+            videos.append({
+                "title": v.get("title", "(untitled)"),
+                "url": v.get("url", ""),
+                "affiliated_softwares": v.get("affiliated_softwares", []),
+            })
             for s in v.get("affiliated_softwares", []):
                 k = normalize(s)
                 if k and k not in seen_aff:
@@ -107,6 +113,7 @@ def per_channel_breakdown(raw):
         out.append({
             "channel": ch.get("channel_title") or ch["url"],
             "url": ch["url"],
+            "videos": videos,
             "affiliated_softwares": affiliated,
             "topics": topics,
         })
@@ -125,7 +132,16 @@ def format_per_channel(breakdown):
     for ch in breakdown:
         sw = ", ".join(ch["affiliated_softwares"]) or "(none)"
         tp = ", ".join(ch["topics"]) or "(none)"
-        blocks.append(f"- **{ch['channel']}** ({ch['url']})\n  - affiliated softwares: {sw}\n  - topics: {tp}")
+        video_lines = "\n".join(
+            f"    - \"{v['title']}\" ({v['url']}) — affiliated: {', '.join(v['affiliated_softwares']) or 'none'}"
+            for v in ch.get("videos", [])
+        )
+        blocks.append(
+            f"- **{ch['channel']}** ({ch['url']})\n"
+            f"  - affiliated softwares: {sw}\n"
+            f"  - topics: {tp}\n"
+            f"  - videos:\n{video_lines}"
+        )
     return "\n".join(blocks)
 
 
